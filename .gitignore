@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+.env.local
+*.secret
+
+# Node (if added later)
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Google Cloud
+*.json
+!cloudbuild.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Test coverage
+.coverage
+htmlcov/
+coverage.xml

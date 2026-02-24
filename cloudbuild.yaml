@@ -1,0 +1,71 @@
+steps:
+  # ── Copy frontend into backend ─────────────────────────────────────────
+  - name: 'ubuntu'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        mkdir -p src/backend/frontend/dist
+        cp src/frontend/index.html src/backend/frontend/dist/index.html
+        echo "Frontend assets copied"
+
+  # ── Build Docker image ─────────────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/cosmos-voice-agent:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/cosmos-voice-agent:latest'
+      - './src/backend'
+
+  # ── Push to Container Registry ─────────────────────────────────────────
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/cosmos-voice-agent:$COMMIT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/cosmos-voice-agent:latest']
+
+  # ── Deploy to Cloud Run ────────────────────────────────────────────────
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'cosmos-voice-agent'
+      - '--image=gcr.io/$PROJECT_ID/cosmos-voice-agent:$COMMIT_SHA'
+      - '--region=${_GCP_LOCATION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=10'
+      - '--timeout=3600'
+      - '--set-env-vars=GCP_PROJECT_ID=$PROJECT_ID'
+      - '--set-env-vars=GCP_LOCATION=${_GCP_LOCATION}'
+      - '--set-env-vars=VERTEX_SEARCH_DATASTORE_ID=${_VERTEX_SEARCH_DATASTORE_ID}'
+      - '--set-env-vars=GEMINI_MODEL=${_GEMINI_MODEL}'
+      - '--set-env-vars=GEMINI_VOICE=${_GEMINI_VOICE}'
+      - '--set-env-vars=RAG_TOP_K=${_RAG_TOP_K}'
+      - '--set-env-vars=DEBUG=false'
+      - '--quiet'
+
+images:
+  - 'gcr.io/$PROJECT_ID/cosmos-voice-agent:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/cosmos-voice-agent:latest'
+
+# Substitution defaults (override with --substitutions flag)
+substitutions:
+  _GCP_LOCATION: us-central1
+  _VERTEX_SEARCH_DATASTORE_ID: cosmos-knowledge-base
+  _GEMINI_MODEL: gemini-2.0-flash-live-preview
+  _GEMINI_VOICE: Aoede
+  _RAG_TOP_K: '5'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_MEDIUM
+
+timeout: '1200s'

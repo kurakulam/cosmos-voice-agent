@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COSMOS – Voice Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #020408;
+      --surface:     #060d18;
+      --surface2:    #0a1829;
+      --accent:      #00d4ff;
+      --accent2:     #7b5cff;
+      --accent3:     #ff6b6b;
+      --zephyr:      #39ff6a;
+      --text:        #c8deff;
+      --text-dim:    #5a7a9a;
+      --glow:        0 0 30px rgba(0,212,255,0.4);
+      --glow2:       0 0 50px rgba(123,92,255,0.3);
+      --radius:      16px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Rajdhani', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ─── Starfield canvas ──────────────────────────────────────────────────── */
+    #starfield {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ─── Layout ────────────────────────────────────────────────────────────── */
+    .app {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: space-between;
+      height: 100vh; padding: 24px 20px 28px;
+      gap: 16px;
+    }
+
+    /* ─── Header ────────────────────────────────────────────────────────────── */
+    header {
+      text-align: center;
+      animation: fadeDown 0.8s ease both;
+    }
+    .logo {
+      font-family: 'Orbitron', monospace;
+      font-weight: 900;
+      font-size: clamp(28px, 5vw, 44px);
+      letter-spacing: 0.18em;
+      background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent));
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: shimmer 4s linear infinite;
+    }
+    .tagline {
+      font-size: 11px;
+      letter-spacing: 0.35em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+    .status-bar {
+      display: flex; align-items: center; gap: 8px;
+      justify-content: center;
+      margin-top: 10px;
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      transition: color 0.4s;
+    }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+    .status-dot.active   { background: var(--zephyr);  box-shadow: 0 0 10px var(--zephyr); }
+    .status-dot.speaking { background: var(--accent);  box-shadow: 0 0 12px var(--accent); }
+    .status-dot.error    { background: var(--accent3); box-shadow: 0 0 12px var(--accent3); }
+
+    /* ─── Orb ───────────────────────────────────────────────────────────────── */
+    .orb-wrap {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+
+    .orb-rings {
+      position: absolute;
+      width: 340px; height: 340px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid;
+      animation: spin linear infinite;
+      opacity: 0.15;
+    }
+    .ring:nth-child(1) { width:340px; height:340px; border-color:var(--accent2); animation-duration:30s; }
+    .ring:nth-child(2) { width:290px; height:290px; border-color:var(--accent);  animation-duration:20s; animation-direction:reverse; }
+    .ring:nth-child(3) { width:240px; height:240px; border-color:var(--zephyr);  animation-duration:14s; }
+
+    .orb {
+      position: relative;
+      width: 180px; height: 180px;
+      cursor: pointer;
+      transition: transform 0.3s ease;
+    }
+    .orb:hover { transform: scale(1.04); }
+    .orb:active { transform: scale(0.97); }
+
+    .orb-core {
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%,
+        rgba(0,212,255,0.25) 0%,
+        rgba(123,92,255,0.18) 40%,
+        rgba(2,4,8,0.9) 80%
+      );
+      border: 1.5px solid rgba(0,212,255,0.3);
+      box-shadow:
+        0 0 60px rgba(0,212,255,0.15),
+        0 0 120px rgba(123,92,255,0.12),
+        inset 0 0 40px rgba(0,212,255,0.08);
+      display: flex; align-items: center; justify-content: center;
+      transition: box-shadow 0.4s;
+    }
+
+    /* Planet Zephyria texture */
+    .orb-core::before {
+      content: '';
+      position: absolute; inset: 8px; border-radius: 50%;
+      background:
+        radial-gradient(ellipse at 30% 25%, rgba(57,255,106,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 75%, rgba(0,212,255,0.1) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(123,92,255,0.06) 0%, transparent 70%);
+      animation: planetRotate 20s linear infinite;
+    }
+
+    .orb-icon {
+      font-size: 48px;
+      z-index: 1;
+      transition: opacity 0.3s;
+      user-select: none;
+    }
+
+    /* Listening pulses */
+    .pulse-ring {
+      position: absolute; inset: 0; border-radius: 50%;
+      border: 2px solid var(--accent);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .orb.listening .orb-core {
+      box-shadow:
+        0 0 80px rgba(0,212,255,0.4),
+        0 0 160px rgba(0,212,255,0.2),
+        inset 0 0 50px rgba(0,212,255,0.15);
+      border-color: rgba(0,212,255,0.7);
+    }
+    .orb.listening .pulse-ring:nth-child(1) { animation: pulse 1.8s ease-out infinite 0s; }
+    .orb.listening .pulse-ring:nth-child(2) { animation: pulse 1.8s ease-out infinite 0.6s; }
+    .orb.listening .pulse-ring:nth-child(3) { animation: pulse 1.8s ease-out infinite 1.2s; }
+
+    .orb.speaking .orb-core {
+      box-shadow:
+        0 0 80px rgba(123,92,255,0.5),
+        0 0 160px rgba(123,92,255,0.25),
+        inset 0 0 50px rgba(123,92,255,0.15);
+      border-color: rgba(123,92,255,0.8);
+    }
+
+    /* ─── Waveform ──────────────────────────────────────────────────────────── */
+    .wave-container {
+      width: 100%;
+      max-width: 480px;
+      height: 64px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 3px;
+    }
+    .wave-bar {
+      flex: 1;
+      max-width: 5px;
+      height: 4px;
+      border-radius: 3px;
+      background: var(--accent);
+      opacity: 0.4;
+      transition: height 0.1s ease, opacity 0.1s ease;
+    }
+    .wave-active .wave-bar {
+      opacity: 0.8;
+    }
+
+    /* ─── Transcript ────────────────────────────────────────────────────────── */
+    .transcript-area {
+      width: 100%;
+      max-width: 540px;
+      min-height: 80px;
+      max-height: 160px;
+      overflow-y: auto;
+      background: rgba(6,13,24,0.8);
+      border: 1px solid rgba(0,212,255,0.12);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      backdrop-filter: blur(12px);
+      display: flex; flex-direction: column; gap: 6px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,212,255,0.2) transparent;
+    }
+    .transcript-area:empty::after {
+      content: 'Say something to begin…';
+      color: var(--text-dim);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+    }
+    .msg {
+      font-size: 14px;
+      line-height: 1.5;
+      animation: fadeUp 0.3s ease both;
+    }
+    .msg.user   { color: var(--accent);   text-align: right; }
+    .msg.cosmos { color: var(--text); }
+    .msg.interim { color: var(--text-dim); font-style: italic; }
+
+    /* ─── Controls ──────────────────────────────────────────────────────────── */
+    .controls {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 14px;
+      width: 100%; max-width: 360px;
+      animation: fadeUp 0.8s 0.3s ease both;
+    }
+
+    .mic-btn {
+      position: relative;
+      width: 72px; height: 72px; border-radius: 50%;
+      border: none; cursor: pointer; outline: none;
+      background: linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%);
+      box-shadow: 0 0 30px rgba(0,212,255,0.3), var(--glow2);
+      transition: transform 0.2s, box-shadow 0.3s, background 0.3s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .mic-btn:hover { transform: scale(1.07); box-shadow: 0 0 50px rgba(0,212,255,0.5); }
+    .mic-btn:active { transform: scale(0.94); }
+    .mic-btn.active {
+      background: linear-gradient(135deg, var(--accent3) 0%, #ff8e53 100%);
+      box-shadow: 0 0 40px rgba(255,107,107,0.5);
+    }
+    .mic-btn svg { width: 28px; height: 28px; fill: white; pointer-events: none; }
+
+    .hint {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      text-align: center;
+    }
+
+    /* ─── RAG context drawer ────────────────────────────────────────────────── */
+    .rag-pill {
+      position: fixed;
+      bottom: 24px; right: 20px;
+      background: rgba(6,13,24,0.9);
+      border: 1px solid rgba(57,255,106,0.25);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--zephyr);
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      display: flex; align-items: center; gap: 6px;
+      transition: all 0.3s;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .rag-pill.visible { opacity: 1; pointer-events: all; }
+    .rag-pill:hover { background: rgba(57,255,106,0.1); }
+
+    .rag-panel {
+      position: fixed;
+      right: 20px; bottom: 68px;
+      width: min(340px, calc(100vw - 40px));
+      max-height: 300px;
+      overflow-y: auto;
+      background: rgba(4,10,20,0.97);
+      border: 1px solid rgba(57,255,106,0.2);
+      border-radius: var(--radius);
+      padding: 16px;
+      backdrop-filter: blur(16px);
+      z-index: 49;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(10px);
+      transition: opacity 0.3s, transform 0.3s;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(57,255,106,0.2) transparent;
+    }
+    .rag-panel.open { opacity: 1; pointer-events: all; transform: translateY(0); }
+    .rag-panel h3 {
+      font-family: 'Orbitron', monospace;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--zephyr);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    .rag-chunk {
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--text-dim);
+      border-left: 2px solid rgba(57,255,106,0.3);
+      padding-left: 10px;
+      margin-bottom: 12px;
+    }
+    .rag-chunk strong { color: var(--text); display: block; margin-bottom: 3px; font-size: 11px; }
+
+    /* ─── Animations ────────────────────────────────────────────────────────── */
+    @keyframes shimmer {
+      0%   { background-position: 0% center; }
+      100% { background-position: 200% center; }
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%   { transform: scale(1);   opacity: 0.7; }
+      100% { transform: scale(1.9); opacity: 0; }
+    }
+    @keyframes planetRotate {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes wavePulse {
+      0%, 100% { height: 4px; }
+      50% { height: var(--h, 30px); }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">COSMOS</div>
+    <div class="tagline">Universe Intelligence · Voice Agent · Zephyria Edition</div>
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Ready</span>
+    </div>
+  </header>
+
+  <!-- Orb -->
+  <div class="orb-wrap">
+    <div class="orb-rings">
+      <div class="ring"></div>
+      <div class="ring"></div>
+      <div class="ring"></div>
+    </div>
+    <div class="orb" id="orb">
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring"></div>
+      <div class="orb-core">
+        <div class="orb-icon" id="orbIcon">🪐</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Waveform -->
+  <div class="wave-container" id="waveContainer"></div>
+
+  <!-- Transcript -->
+  <div class="transcript-area" id="transcriptArea"></div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="mic-btn" id="micBtn" title="Hold to talk">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v7a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-7 9h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.93V21h3v2H8v-2h3v-2.07A7 7 0 0 1 5 12z"/>
+      </svg>
+    </button>
+    <div class="hint" id="hintText">Click to start · hold &amp; speak</div>
+  </div>
+
+</div>
+
+<!-- RAG context pill -->
+<div class="rag-pill" id="ragPill">
+  <span>⬡</span> Knowledge Context
+</div>
+<div class="rag-panel" id="ragPanel">
+  <h3>Retrieved Knowledge</h3>
+  <div id="ragContent"></div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════════
+   COSMOS Voice Agent – Frontend Logic
+   ════════════════════════════════════════════════════════════════════════════ */
+
+// ── Config (injected at build time or from meta tags) ──────────────────────
+const WS_URL = window.COSMOS_WS_URL
+  || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/voice`;
+
+// ── Starfield ──────────────────────────────────────────────────────────────
+(function initStarfield() {
+  const canvas = document.getElementById('starfield');
+  const ctx = canvas.getContext('2d');
+  let stars = [];
+
+  function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    stars = Array.from({ length: 220 }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 1.4 + 0.2,
+      a: Math.random(),
+      da: (Math.random() - 0.5) * 0.005,
+    }));
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Nebula blobs
+    const gradient = ctx.createRadialGradient(canvas.width * 0.75, canvas.height * 0.25, 0, canvas.width * 0.75, canvas.height * 0.25, canvas.width * 0.4);
+    gradient.addColorStop(0, 'rgba(123,92,255,0.04)');
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const g2 = ctx.createRadialGradient(canvas.width * 0.2, canvas.height * 0.7, 0, canvas.width * 0.2, canvas.height * 0.7, canvas.width * 0.3);
+    g2.addColorStop(0, 'rgba(0,212,255,0.03)');
+    g2.addColorStop(1, 'transparent');
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    stars.forEach(s => {
+      s.a += s.da;
+      if (s.a <= 0 || s.a >= 1) s.da *= -1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200,222,255,${s.a})`;
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  draw();
+})();
+
+// ── Waveform bars ──────────────────────────────────────────────────────────
+const waveContainer = document.getElementById('waveContainer');
+const BAR_COUNT = 48;
+const waveBars = Array.from({ length: BAR_COUNT }, () => {
+  const b = document.createElement('div');
+  b.className = 'wave-bar';
+  waveContainer.appendChild(b);
+  return b;
+});
+
+let waveAnim = null;
+function startWave(color = 'var(--accent)') {
+  waveContainer.classList.add('wave-active');
+  if (waveAnim) return;
+  waveAnim = setInterval(() => {
+    waveBars.forEach((b, i) => {
+      const h = 4 + Math.abs(Math.sin(Date.now() / 300 + i * 0.4)) * 40 * Math.random();
+      b.style.height = h + 'px';
+      b.style.background = color;
+    });
+  }, 60);
+}
+function stopWave() {
+  waveContainer.classList.remove('wave-active');
+  clearInterval(waveAnim); waveAnim = null;
+  waveBars.forEach(b => { b.style.height = '4px'; b.style.background = 'var(--accent)'; });
+}
+
+// ── Status helpers ─────────────────────────────────────────────────────────
+const statusDot  = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const orb        = document.getElementById('orb');
+const orbIcon    = document.getElementById('orbIcon');
+const hintText   = document.getElementById('hintText');
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot ' + state;
+  statusText.textContent = text;
+  orb.className = 'orb ' + (state === 'active' ? 'listening' : state === 'speaking' ? 'speaking' : '');
+  if (state === 'active') {
+    orbIcon.textContent = '🎤';
+    startWave('var(--accent)');
+    hintText.textContent = 'Listening… release to send';
+  } else if (state === 'speaking') {
+    orbIcon.textContent = '🪐';
+    startWave('var(--accent2)');
+    hintText.textContent = 'COSMOS is responding…';
+  } else if (state === 'error') {
+    orbIcon.textContent = '⚠️';
+    stopWave();
+    hintText.textContent = 'Connection error – try again';
+  } else {
+    orbIcon.textContent = '🪐';
+    stopWave();
+    hintText.textContent = 'Click to start · hold & speak';
+  }
+}
+
+// ── Transcript ─────────────────────────────────────────────────────────────
+const transcriptArea = document.getElementById('transcriptArea');
+let interimEl = null;
+
+function addMessage(text, role) {
+  if (!text.trim()) return;
+  if (role === 'interim') {
+    if (!interimEl) {
+      interimEl = document.createElement('div');
+      interimEl.className = 'msg interim';
+      transcriptArea.appendChild(interimEl);
+    }
+    interimEl.textContent = text;
+  } else {
+    if (interimEl) { interimEl.remove(); interimEl = null; }
+    const el = document.createElement('div');
+    el.className = `msg ${role}`;
+    el.textContent = text;
+    transcriptArea.appendChild(el);
+  }
+  transcriptArea.scrollTop = transcriptArea.scrollHeight;
+}
+
+// ── RAG panel ──────────────────────────────────────────────────────────────
+const ragPill    = document.getElementById('ragPill');
+const ragPanel   = document.getElementById('ragPanel');
+const ragContent = document.getElementById('ragContent');
+
+ragPill.addEventListener('click', () => ragPanel.classList.toggle('open'));
+document.addEventListener('click', e => {
+  if (!ragPill.contains(e.target) && !ragPanel.contains(e.target)) {
+    ragPanel.classList.remove('open');
+  }
+});
+
+function showRagContext(chunks) {
+  if (!chunks || !chunks.length) return;
+  ragContent.innerHTML = chunks.map(c => `
+    <div class="rag-chunk">
+      <strong>${c.title || c.source || 'Knowledge Base'}</strong>
+      ${c.content}
+    </div>`).join('');
+  ragPill.classList.add('visible');
+}
+
+// ── Audio utilities ────────────────────────────────────────────────────────
+const SAMPLE_RATE = 16000;
+
+async function getMediaStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+  });
+}
+
+function pcmFloat32ToInt16Base64(float32Array) {
+  const int16 = new Int16Array(float32Array.length);
+  for (let i = 0; i < float32Array.length; i++) {
+    int16[i] = Math.max(-32768, Math.min(32767, float32Array[i] * 32767));
+  }
+  const bytes = new Uint8Array(int16.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToFloat32(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const int16 = new Int16Array(bytes.buffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768.0;
+  return float32;
+}
+
+// ── Session state ──────────────────────────────────────────────────────────
+let ws              = null;
+let audioCtx        = null;
+let mediaStream     = null;
+let processor       = null;
+let sessionActive   = false;
+let isRecording     = false;
+let audioQueue      = [];
+let isPlayingAudio  = false;
+let userTranscript  = '';
+
+// ── WebSocket session ──────────────────────────────────────────────────────
+async function startSession() {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+
+  setStatus('', 'Connecting…');
+
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'start' }));
+    sessionActive = true;
+    setStatus('', 'Connected – tap mic to speak');
+  };
+
+  ws.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === 'audio') {
+      const samples = base64ToFloat32(msg.data);
+      audioQueue.push(samples);
+      if (!isPlayingAudio) playAudioQueue();
+      setStatus('speaking', 'COSMOS is speaking…');
+    }
+
+    if (msg.type === 'transcript') {
+      if (msg.final) {
+        addMessage(msg.text, 'cosmos');
+      } else if (msg.text) {
+        addMessage(msg.text, 'interim');
+      }
+    }
+
+    if (msg.type === 'rag_context') {
+      showRagContext(msg.chunks);
+    }
+
+    if (msg.type === 'done') {
+      stopWave();
+      setStatus('', 'Session ended');
+      sessionActive = false;
+    }
+
+    if (msg.type === 'error') {
+      console.error('Server error:', msg.message);
+      setStatus('error', 'Error');
+    }
+  };
+
+  ws.onclose = () => {
+    sessionActive = false;
+    setStatus('', 'Disconnected – click to reconnect');
+  };
+
+  ws.onerror = () => {
+    setStatus('error', 'Connection failed');
+  };
+}
+
+// ── Audio playback queue ───────────────────────────────────────────────────
+async function playAudioQueue() {
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
+  isPlayingAudio = true;
+  while (audioQueue.length > 0) {
+    const samples = audioQueue.shift();
+    await playPCM(samples);
+  }
+  isPlayingAudio = false;
+  if (sessionActive && !isRecording) {
+    setStatus('', 'Ready – tap mic to speak');
+  }
+}
+
+function playPCM(float32) {
+  return new Promise(resolve => {
+    const buffer = audioCtx.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.onended = resolve;
+    source.start();
+  });
+}
+
+// ── Microphone recording ───────────────────────────────────────────────────
+async function startRecording() {
+  if (!sessionActive) await startSession();
+  if (isRecording) return;
+
+  try {
+    mediaStream = await getMediaStream();
+    if (!audioCtx) audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const source = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (e) => {
+      if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const samples = e.inputBuffer.getChannelData(0);
+      const b64 = pcmFloat32ToInt16Base64(samples);
+      ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+    };
+
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    isRecording = true;
+    userTranscript = '';
+    setStatus('active', 'Listening…');
+  } catch (err) {
+    console.error('Mic error', err);
+    setStatus('error', 'Microphone access denied');
+  }
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+
+  if (processor) { processor.disconnect(); processor = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+
+  // Ask backend to do RAG on what we said (via interim transcript fallback)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    if (userTranscript) {
+      ws.send(JSON.stringify({ type: 'transcript_query', text: userTranscript }));
+    }
+  }
+
+  setStatus('speaking', 'Processing…');
+}
+
+// ── Mic button ─────────────────────────────────────────────────────────────
+const micBtn = document.getElementById('micBtn');
+
+let pressTimer = null;
+let tapMode    = false; // true = click-to-toggle, false = push-to-talk
+
+function handleMicStart() {
+  micBtn.classList.add('active');
+  startRecording();
+}
+function handleMicStop() {
+  micBtn.classList.remove('active');
+  stopRecording();
+}
+
+// Click = toggle (start session if needed)
+micBtn.addEventListener('click', async () => {
+  if (!sessionActive) {
+    await startSession();
+    return;
+  }
+  if (isRecording) {
+    handleMicStop();
+  } else {
+    handleMicStart();
+  }
+});
+
+// Pointer down/up = push-to-talk
+micBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (!sessionActive) return;
+  pressTimer = setTimeout(() => {
+    pressTimer = null;
+    handleMicStart();
+  }, 200);
+});
+micBtn.addEventListener('pointerup', () => {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; return; }
+  if (isRecording) handleMicStop();
+});
+micBtn.addEventListener('pointerleave', () => {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+  if (isRecording) handleMicStop();
+});
+
+// Keyboard shortcut: Space bar
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat) { e.preventDefault(); handleMicStart(); }
+});
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space') { e.preventDefault(); handleMicStop(); }
+});
+
+// ── Orb click = start session ──────────────────────────────────────────────
+document.getElementById('orb').addEventListener('click', async () => {
+  if (!sessionActive) await startSession();
+});
+
+// ── Expose ws URL override ─────────────────────────────────────────────────
+// Usage: window.COSMOS_WS_URL = 'wss://your-cloud-run-url/ws/voice'
+</script>
+
+</body>
+</html>
