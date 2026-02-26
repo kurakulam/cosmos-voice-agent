@@ -15,8 +15,7 @@ import os
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, FileResponse
 
 from config import settings
 from rag import VertexSearchRAG
@@ -41,11 +40,30 @@ rag = VertexSearchRAG(
     data_store_id=settings.VERTEX_SEARCH_DATASTORE_ID,
 )
 
+# ─── Locate frontend index.html ───────────────────────────────────────────────
+# Search multiple possible locations (local dev vs Docker container)
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_FRONTEND_CANDIDATES = [
+    os.path.join(_BASE, "frontend", "dist", "index.html"),
+    os.path.join(_BASE, "..", "frontend", "index.html"),
+    os.path.join(_BASE, "frontend", "index.html"),
+    "/app/frontend/dist/index.html",
+]
+FRONTEND_HTML = None
+for _candidate in _FRONTEND_CANDIDATES:
+    if os.path.isfile(_candidate):
+        FRONTEND_HTML = _candidate
+        log.info(f"Frontend found at: {_candidate}")
+        break
+
+if not FRONTEND_HTML:
+    log.warning("Frontend index.html not found — root route will return 404")
+
 
 # ─── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.0.0", "frontend": FRONTEND_HTML is not None}
 
 
 # ─── RAG endpoint (REST, for debugging) ───────────────────────────────────────
@@ -55,27 +73,33 @@ async def search(query: str, top_k: int = 5):
     return {"query": query, "results": results}
 
 
+# ─── Serve frontend ────────────────────────────────────────────────────────────
+@app.get("/")
+async def serve_root():
+    if FRONTEND_HTML and os.path.isfile(FRONTEND_HTML):
+        return FileResponse(FRONTEND_HTML, media_type="text/html")
+    return HTMLResponse("<h1>COSMOS Voice Agent</h1><p>Frontend not found. Check deployment.</p>")
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    # Skip API and WebSocket routes
+    if full_path.startswith("api/") or full_path.startswith("ws/") or full_path == "health":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
+    if FRONTEND_HTML and os.path.isfile(FRONTEND_HTML):
+        return FileResponse(FRONTEND_HTML, media_type="text/html")
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="Frontend not found")
+
+
 # ─── Voice WebSocket ───────────────────────────────────────────────────────────
 @app.websocket("/ws/voice")
 async def voice_ws(ws: WebSocket):
-    """
-    Protocol (JSON-framed binary or JSON messages):
-      Client → Server:
-        { "type": "start" }                        – begin session
-        { "type": "audio", "data": "<b64 pcm>" }   – raw audio chunk (16-bit PCM, 16 kHz mono)
-        { "type": "stop" }                         – end session
-
-      Server → Client:
-        { "type": "audio", "data": "<b64 pcm>" }   – Gemini response audio
-        { "type": "transcript", "text": "..." }    – interim/final transcript
-        { "type": "rag_context", "chunks": [...] } – retrieved knowledge
-        { "type": "error", "message": "..." }
-        { "type": "done" }
-    """
     await ws.accept()
     log.info("WebSocket connected")
 
-    session: GeminiLiveSession | None = None
+    session = None
 
     try:
         while True:
@@ -84,7 +108,6 @@ async def voice_ws(ws: WebSocket):
             mtype = msg.get("type")
 
             if mtype == "start":
-                # Build system prompt with RAG context placeholder
                 system_prompt = _build_system_prompt()
                 session = GeminiLiveSession(
                     project_id=settings.GCP_PROJECT_ID,
@@ -102,17 +125,12 @@ async def voice_ws(ws: WebSocket):
                 log.info("Gemini Live session started")
 
             elif mtype == "audio" and session:
-                audio_b64: str = msg.get("data", "")
-                if not audio_b64:
-                    continue
-
-                # --- RAG: retrieve on each user utterance (lightweight) ---
-                # We'll also do a RAG call when we get a transcript
-                await session.send_audio(audio_b64)
+                audio_b64 = msg.get("data", "")
+                if audio_b64:
+                    await session.send_audio(audio_b64)
 
             elif mtype == "transcript_query" and session:
-                # Client sends the recognized text so we can enrich context
-                user_text: str = msg.get("text", "")
+                user_text = msg.get("text", "")
                 if user_text:
                     chunks = await rag.retrieve(user_text, top_k=settings.RAG_TOP_K)
                     context = _format_rag_context(chunks)
@@ -139,17 +157,6 @@ async def voice_ws(ws: WebSocket):
             await session.stop()
 
 
-# ─── Serve frontend (production) ───────────────────────────────────────────────
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-if os.path.isdir(FRONTEND_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        index = os.path.join(FRONTEND_DIR, "index.html")
-        return FileResponse(index)
-
-
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 def _build_system_prompt() -> str:
     return (
@@ -163,7 +170,7 @@ def _build_system_prompt() -> str:
     )
 
 
-def _format_rag_context(chunks: list[dict]) -> str:
+def _format_rag_context(chunks: list) -> str:
     if not chunks:
         return ""
     parts = ["Here is relevant knowledge retrieved for this query:\n"]
