@@ -1,6 +1,6 @@
 """
-gemini_live.py – Manages a Gemini Live (real-time multimodal) session.
-Updated to use correct API for google-genai SDK latest version.
+gemini_live.py – Manages a Gemini Live session.
+Uses send_realtime_input which is the correct method in google-genai >= 0.8
 """
 
 import asyncio
@@ -24,7 +24,7 @@ class GeminiLiveSession:
         self._session = None
         self._client = None
         self._recv_task: Optional[asyncio.Task] = None
-        self._cm = None  # context manager reference
+        self._cm = None
 
     async def start(self):
         try:
@@ -53,7 +53,7 @@ class GeminiLiveSession:
             self._cm = self._client.aio.live.connect(model=self.model, config=config)
             self._session = await self._cm.__aenter__()
             self._recv_task = asyncio.create_task(self._receive_loop())
-            log.info("Gemini Live session started")
+            log.info(f"Gemini Live session started with model: {self.model}")
 
         except Exception as exc:
             log.error(f"Failed to start Gemini Live session: {exc}")
@@ -78,35 +78,10 @@ class GeminiLiveSession:
         if not self._session:
             return
         try:
-            # Use send_realtime_input for audio chunks (new SDK API)
+            # Correct method in latest google-genai SDK
             await self._session.send_realtime_input(
                 audio=base64.b64decode(audio_b64)
             )
-        except AttributeError:
-            # Fallback for older SDK versions
-            try:
-                from google.genai import types as gtypes
-                # Try different class names across SDK versions
-                for cls_name in ["Blob", "MediaChunk"]:
-                    if hasattr(gtypes, cls_name):
-                        chunk_cls = getattr(gtypes, cls_name)
-                        chunk = chunk_cls(
-                            data=base64.b64decode(audio_b64),
-                            mime_type="audio/pcm;rate=16000"
-                        )
-                        # Try different send method signatures
-                        for input_cls_name in ["RealtimeInput", "LiveClientRealtimeInput"]:
-                            if hasattr(gtypes, input_cls_name):
-                                input_cls = getattr(gtypes, input_cls_name)
-                                await self._session.send(input_cls(media_chunks=[chunk]))
-                                return
-                        # Direct send with blob
-                        await self._session.send({"realtime_input": {"media_chunks": [
-                            {"data": base64.b64decode(audio_b64), "mime_type": "audio/pcm;rate=16000"}
-                        ]}})
-                        return
-            except Exception as exc2:
-                log.warning(f"send_audio fallback error: {exc2}")
         except Exception as exc:
             log.warning(f"send_audio error: {exc}")
 
@@ -121,14 +96,8 @@ class GeminiLiveSession:
                     parts=[Part(text=f"[KNOWLEDGE BASE CONTEXT]\n{context_text}")]
                 )
             )
-        except AttributeError:
-            try:
-                from google.genai.types import Content, Part
-                await self._session.send(
-                    Content(role="user", parts=[Part(text=f"[KNOWLEDGE BASE CONTEXT]\n{context_text}")])
-                )
-            except Exception as exc:
-                log.warning(f"inject_context error: {exc}")
+        except Exception as exc:
+            log.warning(f"inject_context error: {exc}")
 
     async def _receive_loop(self):
         if not self._session:
@@ -140,11 +109,8 @@ class GeminiLiveSession:
                     audio_b64 = base64.b64encode(response.data).decode()
                     self.output_audio_callback(audio_b64)
 
-                # Check server_content for audio and transcript
                 if hasattr(response, "server_content") and response.server_content:
                     sc = response.server_content
-
-                    # Audio in model turn parts
                     if hasattr(sc, "model_turn") and sc.model_turn:
                         for part in sc.model_turn.parts:
                             if hasattr(part, "inline_data") and part.inline_data:
@@ -152,14 +118,8 @@ class GeminiLiveSession:
                                 self.output_audio_callback(audio_b64)
                             if hasattr(part, "text") and part.text:
                                 self.transcript_callback(part.text, False)
-
                     if hasattr(sc, "turn_complete") and sc.turn_complete:
                         self.transcript_callback("", True)
-
-                # Direct audio attribute (some SDK versions)
-                if hasattr(response, "audio") and response.audio:
-                    audio_b64 = base64.b64encode(response.audio).decode()
-                    self.output_audio_callback(audio_b64)
 
         except asyncio.CancelledError:
             pass
