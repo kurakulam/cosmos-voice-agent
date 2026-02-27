@@ -19,7 +19,7 @@ export CLOUD_RUN_SERVICE="cosmos-voice-agent"
 export IMAGE_NAME="gcr.io/${GCP_PROJECT_ID}/${CLOUD_RUN_SERVICE}"
 
 # ── App Settings ─────────────────────────────────────────────────────────────
-export GEMINI_MODEL="gemini-2.0-flash-live-preview"
+export GEMINI_MODEL="gemini-live-2.5-flash-native-audio"
 export GEMINI_VOICE="Aoede"
 export RAG_TOP_K="5"
 
