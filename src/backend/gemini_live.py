@@ -78,9 +78,12 @@ class GeminiLiveSession:
         if not self._session:
             return
         try:
-            # Correct method in latest google-genai SDK
+            from google.genai.types import Blob
             await self._session.send_realtime_input(
-                audio=base64.b64decode(audio_b64)
+                audio=Blob(
+                    data=base64.b64decode(audio_b64),
+                    mime_type="audio/pcm;rate=16000"
+                )
             )
         except Exception as exc:
             log.warning(f"send_audio error: {exc}")
