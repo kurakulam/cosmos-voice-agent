@@ -105,26 +105,45 @@ class GeminiLiveSession:
     async def _receive_loop(self):
         if not self._session:
             return
+        # Batch audio chunks — accumulate ~100ms worth before sending
+        # At 24kHz 16-bit mono: 100ms = 24000 * 0.1 * 2 = 4800 bytes
+        BATCH_BYTES = 4800
+        audio_buffer = bytearray()
+
+        async def flush_audio():
+            nonlocal audio_buffer
+            if audio_buffer:
+                self.output_audio_callback(base64.b64encode(bytes(audio_buffer)).decode())
+                audio_buffer = bytearray()
+
         try:
             async for response in self._session.receive():
-                # Audio output
+                # Collect raw audio data
+                raw_audio = None
+
                 if hasattr(response, "data") and response.data:
-                    audio_b64 = base64.b64encode(response.data).decode()
-                    self.output_audio_callback(audio_b64)
+                    raw_audio = response.data
 
                 if hasattr(response, "server_content") and response.server_content:
                     sc = response.server_content
                     if hasattr(sc, "model_turn") and sc.model_turn:
                         for part in sc.model_turn.parts:
                             if hasattr(part, "inline_data") and part.inline_data:
-                                audio_b64 = base64.b64encode(part.inline_data.data).decode()
-                                self.output_audio_callback(audio_b64)
+                                raw_audio = part.inline_data.data
                             if hasattr(part, "text") and part.text:
                                 self.transcript_callback(part.text, False)
                     if hasattr(sc, "turn_complete") and sc.turn_complete:
+                        await flush_audio()  # Send remaining audio on turn end
                         self.transcript_callback("", True)
 
+                # Accumulate audio into buffer
+                if raw_audio:
+                    audio_buffer.extend(raw_audio)
+                    # Send when we have enough for a smooth chunk
+                    if len(audio_buffer) >= BATCH_BYTES:
+                        await flush_audio()
+
         except asyncio.CancelledError:
-            pass
+            await flush_audio()
         except Exception as exc:
             log.error(f"Receive loop error: {exc}")
