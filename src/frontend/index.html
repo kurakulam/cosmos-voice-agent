@@ -315,7 +315,7 @@ function drainQueue() {
     while (audioQueue.length) scheduleChunk(audioQueue.shift());
     if (!audioQueue.length && nextPlayTime <= audioCtx.currentTime + 0.05) {
       clearInterval(drainTimer); drainTimer = null; isPlaying = false;
-      if (sessionActive) setMode('listening');
+      if (sessionActive) { unmuteMic(); setMode('listening'); }
     }
   }, 10);
 }
@@ -343,6 +343,19 @@ function stopMic() {
   if (micSource) { micSource.disconnect(); micSource = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
   if (micCtx) { micCtx.close(); micCtx = null; }
+}
+
+function muteMic() {
+  if (micProcessor) micProcessor.disconnect();
+}
+
+function unmuteMic() {
+  if (micProcessor && micSource) {
+    try {
+      micSource.connect(micProcessor);
+      micProcessor.connect(micCtx.destination);
+    } catch(e) {}
+  }
 }
 
 // ── Waveform ────────────────────────────────────────────────────────────────
@@ -458,7 +471,11 @@ async function startSession() {
 
     if (msg.type === 'audio') {
       audioQueue.push(base64ToFloat32(msg.data));
-      if (!isPlaying) { setMode('speaking'); drainQueue(); }
+      if (!isPlaying) {
+        muteMic();          // stop sending mic while COSMOS speaks
+        setMode('speaking');
+        drainQueue();
+      }
     }
     if (msg.type === 'transcript') {
       if (msg.final && msg.text) addMsg(msg.text, 'cosmos');
