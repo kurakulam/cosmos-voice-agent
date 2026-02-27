@@ -680,51 +680,53 @@ async function startSession() {
   };
 }
 
-// ── Audio playback queue (gapless scheduling) ─────────────────────────────
-let nextPlayTime = 0;
+// ── Audio playback — gapless streaming via scheduled buffers ──────────────
+let nextPlayTime   = 0;   // wall-clock time of the next chunk's start
+let drainTimer     = null;
 
-async function playAudioQueue() {
-  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: 24000 });
-  if (isPlayingAudio) return;
-  isPlayingAudio = true;
-
-  // Reset schedule if audio context fell behind
-  if (nextPlayTime < audioCtx.currentTime) {
-    nextPlayTime = audioCtx.currentTime + 0.05; // 50ms buffer to start
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext({ sampleRate: 24000, latencyHint: 'interactive' });
+    nextPlayTime = 0;
   }
-
-  while (audioQueue.length > 0) {
-    const samples = audioQueue.shift();
-    schedulePCM(samples);
-  }
-
-  // Keep draining queue as new chunks arrive
-  const drainInterval = setInterval(() => {
-    while (audioQueue.length > 0) {
-      const samples = audioQueue.shift();
-      schedulePCM(samples);
-    }
-    // Stop draining when playback is done and queue is empty
-    if (audioQueue.length === 0 && nextPlayTime <= audioCtx.currentTime + 0.1) {
-      clearInterval(drainInterval);
-      isPlayingAudio = false;
-      if (sessionActive && !isRecording) {
-        setStatus('', 'Ready – tap mic to speak');
-      }
-    }
-  }, 20);
 }
 
-function schedulePCM(float32) {
-  if (!audioCtx) return;
-  const buffer = audioCtx.createBuffer(1, float32.length, 24000);
-  buffer.copyToChannel(float32, 0);
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioCtx.destination);
-  // Schedule exactly back-to-back — no gaps, no overlaps
-  source.start(nextPlayTime);
-  nextPlayTime += buffer.duration;
+function scheduleChunk(float32) {
+  ensureAudioCtx();
+  const buf = audioCtx.createBuffer(1, float32.length, 24000);
+  buf.copyToChannel(float32, 0);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+
+  // Keep a small look-ahead so chunks are always ready before they're needed
+  const LOOKAHEAD = 0.08; // 80 ms
+  const now = audioCtx.currentTime;
+  if (nextPlayTime < now + LOOKAHEAD) nextPlayTime = now + LOOKAHEAD;
+  src.start(nextPlayTime);
+  nextPlayTime += buf.duration;
+}
+
+async function playAudioQueue() {
+  ensureAudioCtx();
+  isPlayingAudio = true;
+
+  // Drain whatever is already buffered
+  while (audioQueue.length > 0) scheduleChunk(audioQueue.shift());
+
+  // Keep draining as new chunks arrive (poll every 10 ms)
+  if (drainTimer) clearInterval(drainTimer);
+  drainTimer = setInterval(() => {
+    while (audioQueue.length > 0) scheduleChunk(audioQueue.shift());
+
+    // Done when the scheduled timeline has caught up with now
+    if (audioQueue.length === 0 && nextPlayTime <= audioCtx.currentTime + 0.05) {
+      clearInterval(drainTimer);
+      drainTimer = null;
+      isPlayingAudio = false;
+      if (sessionActive && !isRecording) setStatus('', 'Ready – tap mic to speak');
+    }
+  }, 10);
 }
 
 // ── Microphone recording ───────────────────────────────────────────────────
