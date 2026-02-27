@@ -24,6 +24,7 @@ class GeminiLiveSession:
         self._session = None
         self._client = None
         self._recv_task: Optional[asyncio.Task] = None
+        self._keepalive_task: Optional[asyncio.Task] = None
         self._cm = None
 
     async def start(self):
@@ -53,6 +54,7 @@ class GeminiLiveSession:
             self._cm = self._client.aio.live.connect(model=self.model, config=config)
             self._session = await self._cm.__aenter__()
             self._recv_task = asyncio.create_task(self._receive_loop())
+            self._keepalive_task = asyncio.create_task(self._keepalive_loop())
             log.info(f"Gemini Live session started with model: {self.model}")
 
         except Exception as exc:
@@ -60,6 +62,12 @@ class GeminiLiveSession:
             raise
 
     async def stop(self):
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            try:
+                await self._keepalive_task
+            except asyncio.CancelledError:
+                pass
         if self._recv_task:
             self._recv_task.cancel()
             try:
@@ -101,6 +109,23 @@ class GeminiLiveSession:
             )
         except Exception as exc:
             log.warning(f"inject_context error: {exc}")
+
+    async def _keepalive_loop(self):
+        """Send silence every 10s to keep the Gemini WebSocket alive."""
+        SILENCE = bytes(3200)  # 100ms of silence at 16kHz 16-bit mono
+        try:
+            while True:
+                await asyncio.sleep(10)
+                if self._session:
+                    try:
+                        from google.genai.types import Blob
+                        await self._session.send_realtime_input(
+                            audio=Blob(data=SILENCE, mime_type="audio/pcm;rate=16000")
+                        )
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            pass
 
     async def _receive_loop(self):
         if not self._session:
