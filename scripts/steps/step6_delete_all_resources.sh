@@ -10,7 +10,7 @@
 #   ✗ Container Registry images
 #   ✗ Vertex AI Search data store + app
 #   ✗ GCS bucket + PDFs
-#   ✗ Service account
+#   ✓ Service account (kept — free, avoids permissions hassle)
 #
 # What is KEPT:
 #   ✓ GCP project
