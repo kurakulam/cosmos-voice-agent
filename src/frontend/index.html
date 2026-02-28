@@ -331,7 +331,7 @@ async function startMic() {
   micSource = micCtx.createMediaStreamSource(micStream);
   micProcessor = micCtx.createScriptProcessor(4096, 1, 1);
   micProcessor.onaudioprocess = e => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || micMuted) return;
     ws.send(JSON.stringify({ type: 'audio', data: pcmToBase64(e.inputBuffer.getChannelData(0)) }));
   };
   micSource.connect(micProcessor);
@@ -345,18 +345,9 @@ function stopMic() {
   if (micCtx) { micCtx.close(); micCtx = null; }
 }
 
-function muteMic() {
-  if (micProcessor) micProcessor.disconnect();
-}
-
-function unmuteMic() {
-  if (micProcessor && micSource) {
-    try {
-      micSource.connect(micProcessor);
-      micProcessor.connect(micCtx.destination);
-    } catch(e) {}
-  }
-}
+let micMuted = false;
+function muteMic() { micMuted = true; }
+function unmuteMic() { micMuted = false; }
 
 // ── Waveform ────────────────────────────────────────────────────────────────
 const waveEl = document.getElementById('waveform');
