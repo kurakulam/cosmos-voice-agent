@@ -111,11 +111,12 @@ class GeminiLiveSession:
             log.warning(f"inject_context error: {exc}")
 
     async def _keepalive_loop(self):
-        """Send silence every 10s to keep the Gemini WebSocket alive."""
+        """Continuously send silence to keep Gemini WebSocket alive.
+        Gemini needs a continuous audio stream — gaps cause timeout."""
         SILENCE = bytes(3200)  # 100ms of silence at 16kHz 16-bit mono
         try:
             while True:
-                await asyncio.sleep(10)
+                await asyncio.sleep(0.1)  # every 100ms
                 if self._session:
                     try:
                         from google.genai.types import Blob
