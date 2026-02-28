@@ -11,7 +11,7 @@ export SEARCH_LOCATION="global"          # Vertex AI Search uses 'us' not 'us-ce
 
 # ── Resource Names ───────────────────────────────────────────────────────────
 export GCS_BUCKET="${GCP_PROJECT_ID}-cosmos-knowledge"
-export DATASTORE_ID="cosmos-knowledge-base_1772078129175"
+export DATASTORE_ID="cosmos-knowledge-base_1772318359204"
 export APP_ID="cosmos-voice-agent-app"
 export SERVICE_ACCOUNT_NAME="cosmos-voice-agent-sa"
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
